@@ -176,7 +176,7 @@ runs:
         apiVersion: cilium.io/v1alpha1
         kind: TracingPolicy
         metadata:
-          name: "fd-install"
+          name: "secure-checkout"
         spec:
           kprobes:
             - call: "security_file_permission"
@@ -219,3 +219,11 @@ runs:
         cat policy.yaml
         
         sudo tetra tracingpolicy add policy.yaml
+    - name: Post step cleanup
+      uses: pyTooling/Actions/with-post-step@main #TODO: move this to our own repo
+      with:
+        main: |
+          echo "Setting up post-job cleanup"
+        post: |
+          sudo tetra tracingpolicy delete secure-checkout
+          echo "Post-job cleanup completed"

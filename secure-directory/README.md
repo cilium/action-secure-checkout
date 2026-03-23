@@ -1,12 +1,11 @@
-# action-secure-checkout
+# action-secure-checkout/secure-directory
 
-A secure wrapper around `actions/checkout` that runs [Tetragon](https://github.com/cilium/tetragon) and applies a tracing policy to disallow writes to checked-out code.
+An action that runs [Tetragon](https://github.com/cilium/tetragon) and applies a tracing policy to disallow writes any files in specified directory.
 
 ## What this action does
 
-- Executes a standard repository checkout (via `actions/checkout`).
 - Starts/runs Tetragon for runtime enforcement/observation.
-- Applies a tracing policy that prevents write operations to files in the checked-out workspace.
+- Applies a tracing policy that prevents write operations to files in specified directory.
 
 ## Why
 
@@ -14,8 +13,8 @@ This helps protect checked-out source code from in-job edition
 
 ## Behavior
 
-- Read operations on checked-out code remain allowed.
-- Write attempts to checked-out files are blocked by policy.
+- Read operations on secured directory remain allowed.
+- Write attempts to secured files files are blocked by policy.
 - Policy is intended to reduce supply-chain and CI tampering risk during workflow execution.
 
 ## Usage
@@ -31,15 +30,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Secure checkout
-        uses: mkwiek/action-secure-checkout
+        uses: action/checkout
+        with:
+          dir: secure-dir
+          
+      - name: Guard checked out code with Tetragon
+        uses: cilium/action-secure-checkout/secure-directory
+        with:
+          path: secure-dir
         
       - name: use securely checked out code
         run: |
            # This will succeed
-           cat README.md
+           cat secure-dir/README.md
            
            # This will fail due to the policy
-           echo "malicious edit" >> README.md
+           echo "malicious edit" >> secure=dir/README.md
       
       - name: Normal checkout (untrusted)
         uses: actions/checkout@v3

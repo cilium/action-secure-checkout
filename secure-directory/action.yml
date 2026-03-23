@@ -1,0 +1,99 @@
+name: "Secure checkout"
+
+description: "Guards a directory against changes with Tetragon Magic™. Needs to run on a runner with systemctl and bash"
+inputs:
+  path:
+    description: 'Relative path under $GITHUB_WORKSPACE to be guarded'
+    required: true
+  untrusted-dir:
+    description: >
+      Directory under the guarded directory path that should be considered untrusted and can be changed.
+    default: 'untrusted'
+runs:
+  using: "composite"
+  steps:
+    - name: Set up tetragon
+      shell: bash
+      run: |
+        if systemctl status tetragon; then
+          echo "Tetragon is already installed and running"
+          exit 0
+        fi
+        
+        curl -LO https://github.com/cilium/tetragon/releases/download/v1.6.0/tetragon-v1.6.0-amd64.tar.gz
+        tar -xvf tetragon-v1.6.0-amd64.tar.gz
+        cd tetragon-v1.6.0-amd64/
+        sudo ./install.sh
+        sudo systemctl status tetragon
+        
+        if which tetra; then
+          echo "Tetragon CLI is already installed"
+          sleep 5 #wait for tetragon to be ready
+          exit 0
+        fi
+        
+        curl -L https://github.com/cilium/tetragon/releases/latest/download/tetra-linux-amd64.tar.gz | tar -xz
+        sudo mv tetra /usr/local/bin
+        
+        sleep 5 #wait for tetragon to be ready
+        sudo systemctl status tetragon
+    - name: Apply tracing policy
+      shell: bash
+      run: |
+        SECURE_PATH=$( realpath $GITHUB_WORKSPACE/${{ inputs.path }} )
+        
+        cat <<EOF > policy.yaml
+        apiVersion: cilium.io/v1alpha1
+        kind: TracingPolicy
+        metadata:
+          name: "secure-directory"
+        spec:
+          kprobes:
+            - call: "security_file_permission"
+              syscall: false
+              return: true
+              args:
+                - index: 0
+                  type: "file" # (struct file *) used for getting the path
+                - index: 1
+                  type: "int" # 0x04 is MAY_READ, 0x02 is MAY_WRITE
+              returnArg:
+                index: 0
+                type: "int"
+              returnArgAction: "Post"
+              selectors:
+                - matchArgs:
+                    - index: 0
+                      operator: "Prefix"
+                      values:
+                        - "$SECURE_PATH/${{ inputs.untrusted-dir }}"
+                    - index: 1
+                      operator: "Equal"
+                      values:
+                        - "2" # MAY_WRITE
+                  matchActions:
+                    - action: NoPost
+                - matchArgs:
+                    - index: 0
+                      operator: "Prefix"
+                      values:
+                        - "$SECURE_PATH"
+                    - index: 1
+                      operator: "Equal"
+                      values:
+                        - "2" # MAY_WRITE
+                  matchActions:
+                    - action: Override
+                      argError: -1
+        EOF
+        cat policy.yaml
+        
+        sudo tetra tracingpolicy add policy.yaml
+    - name: Post step cleanup
+      uses: pyTooling/Actions/with-post-step@main #TODO: move this to our own repo
+      with:
+        main: |
+          echo "Setting up post-job cleanup"
+        post: |
+          sudo tetra tracingpolicy delete secure-directory
+          echo "Post-job cleanup completed"
